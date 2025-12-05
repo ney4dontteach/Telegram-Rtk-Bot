@@ -3,73 +3,325 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Моё Telegram-приложение</title>
+  <title>🧠 Умный анализ продаж</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background-color: #f3f3f3;
+      background: #f3f3f3;
       color: #1c1c1c;
-      text-align: center;
-      padding: 50px 20px;
+      padding: 20px;
       margin: 0;
     }
     .container {
-      max-width: 500px;
+      max-width: 700px;
       margin: 0 auto;
       background: white;
       border-radius: 12px;
-      padding: 30px;
+      padding: 20px;
       box-shadow: 0 1px 6px rgba(0,0,0,0.1);
     }
     h1 {
+      text-align: center;
       color: #3a86ff;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+    input, select, button {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
     }
     button {
       background-color: #3a86ff;
       color: white;
       border: none;
-      padding: 12px 24px;
-      font-size: 16px;
-      border-radius: 8px;
       cursor: pointer;
-      margin-top: 20px;
+      font-weight: bold;
     }
-    button:active {
-      opacity: 0.8;
+    button:hover {
+      background-color: #2a76ef;
+    }
+    #result {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f0f8ff;
+      border-radius: 8px;
+      border: 1px solid #c0e0ff;
+    }
+    .match {
+      font-size: 14px;
+      color: #555;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>🚀 Добро пожаловать!</h1>
-    <p id="user-info">Загрузка данных пользователя...</p>
-    <button onclick="sendHello()">Сказать "Привет" боту</button>
+    <h1>🧠 Умный анализ продаж</h1>
+
+    <div class="form-group">
+      <label>1. Загрузите файл Excel (.xlsx)</label>
+      <input type="file" id="fileInput" accept=".xlsx, .xls" />
+    </div>
+
+    <div class="form-group">
+      <label>1.1 Выберите лист</label>
+      <select id="sheetSelect" disabled>
+        <option>Сначала загрузите файл</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>2. Выберите ваш офис продаж</label>
+      <select id="officeSelect" disabled>
+        <option>Сначала выберите лист</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>3. Целевой рост (%) от плана</label>
+      <input type="number" id="growthInput" value="10" min="0" />
+    </div>
+
+    <div class="form-group">
+      <label>4. Целевая дата</label>
+      <input type="date" id="dateInput" />
+    </div>
+
+    <button onclick="calculate()" disabled id="calcButton">Рассчитать</button>
+
+    <div id="result"></div>
   </div>
 
-  <!-- Подключаем Telegram JS SDK -->
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- Библиотека для чтения Excel -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
   <script>
-    // Проверяем, загружен ли Telegram WebApp
-    if (window.Telegram?.WebApp) {
-      const user = Telegram.WebApp.initDataUnsafe.user;
+    let allData = [];
+    let workbook = null;
 
-      if (user) {
-        document.getElementById('user-info').textContent = 
-          `Привет, ${user.first_name}! Ты в приложении.`;
-      } else {
-        document.getElementById('user-info').textContent = 'Привет! Не удалось определить пользователя.';
+    // Ключевые слова для поиска колонки офиса
+    const OFFICE_KEYWORDS = ['магазин', 'офис', 'дс', 'адрес', 'номер', 'id', 'регион', 'дивизион'];
+
+    // При загрузке файла
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        workbook = XLSX.read(data, { type: 'array' });
+
+        const sheetSelect = document.getElementById('sheetSelect');
+        sheetSelect.innerHTML = '';
+        workbook.SheetNames.forEach(name => {
+          const option = document.createElement('option');
+          option.value = name;
+          option.textContent = name;
+          sheetSelect.appendChild(option);
+        });
+
+        sheetSelect.disabled = false;
+        document.getElementById('result').innerHTML = '<p>✅ Файл загружен. Выберите лист.</p>';
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
+    // При смене листа — анализируем структуру
+    document.getElementById('sheetSelect').addEventListener('change', function() {
+      const sheetName = this.value;
+      const worksheet = workbook.Sheets[sheetName];
+      allData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      
+      if (allData.length < 2) {
+        document.getElementById('result').innerHTML = '<p style="color: red">❌ Недостаточно данных в листе.</p>';
+        return;
       }
 
-      // Кнопка отправляет данные боту
-      function sendHello() {
-        Telegram.WebApp.sendData("Привет! Пользователь нажал кнопку.");
+      // Первая строка — заголовки
+      const headers = allData[0];
+      const dataRows = allData.slice(1).map(row => {
+        const obj = {};
+        headers.forEach((h, i) => {
+          obj[h] = row[i];
+        });
+        return obj;
+      });
+
+      // Ищем пару План/Факт по смыслу
+      const { plan: planCol, fact: factCol, baseName } = findMatchingPlanFact(headers);
+
+      if (!planCol) {
+        document.getElementById('result').innerHTML = '<p style="color: red">❌ Не найдена колонка с "планом". Проверьте названия.</p>';
+        return;
+      }
+      if (!factCol) {
+        document.getElementById('result').innerHTML = '<p style="color: red">❌ Не найдена колонка с "фактом" для <b>' + baseName + '</b>. Проверьте.</p>';
+        return;
       }
 
-      // Можно вызвать эту функцию при старте
-      window.sendHello = sendHello;
-    } else {
-      document.getElementById('user-info').textContent = '⚠️ Приложение работает не в Telegram.';
+      // Ищем колонку офиса
+      const officeCol = findColumn(headers, OFFICE_KEYWORDS);
+      if (!officeCol) {
+        document.getElementById('result').innerHTML = '<p style="color: red">❌ Не найдена колонка с "офисом". Проверьте названия.</p>';
+        return;
+      }
+
+      // Сохраняем
+      window.headers = headers;
+      window.dataRows = dataRows;
+      window.planCol = planCol;
+      window.factCol = factCol;
+      window.officeCol = officeCol;
+
+      // Получаем уникальные офисы
+      const offices = [...new Set(dataRows.map(row => row[officeCol]))].filter(Boolean).sort();
+
+      const officeSelect = document.getElementById('officeSelect');
+      officeSelect.innerHTML = '';
+      offices.forEach(office => {
+        const option = document.createElement('option');
+        option.value = office;
+        option.textContent = office;
+        officeSelect.appendChild(option);
+      });
+
+      officeSelect.disabled = false;
+      document.getElementById('calcButton').disabled = false;
+
+      document.getElementById('result').innerHTML = `
+        <p>✅ Лист загружен.</p>
+        <p class="match">🔧 Найдено: <b>${baseName || 'продажи'}</b></p>
+        <p class="match">📈 План = <b>${planCol}</b></p>
+        <p class="match">📊 Факт = <b>${factCol}</b></p>
+        <p class="match">🏢 Офис = <b>${officeCol}</b></p>
+        <p>Выберите офис и нажмите "Рассчитать".</p>
+      `;
+    });
+
+    // Умный поиск: ищет пару План/Факт по общему названию
+    function findMatchingPlanFact(headers) {
+      // Сначала ищем по парам
+      for (let header of headers) {
+        if (!header) continue;
+        const h = String(header).toLowerCase();
+
+        // Ищем "План", но не "Факт", не "%"
+        if (
+          (h.includes('план') || h.includes('planned') || h.includes('target')) &&
+          !h.includes('факт') &&
+          !h.includes('actual') &&
+          !h.includes('%') &&
+          !h.includes('выполн')
+        ) {
+          // Убираем слово "план" и чистим
+          let base = h
+            .replace(/план|planned|target|plan|pl/gi, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          if (base.length < 2) continue;
+
+          // Ищем колонку с "факт" и тем же base
+          const factHeader = headers.find(h2 => {
+            if (!h2) return false;
+            const h2Str = String(h2).toLowerCase();
+            return (
+              (h2Str.includes('факт') || h2Str.includes('actual') || h2Str.includes('реал')) &&
+              h2Str.includes(base)
+            );
+          });
+
+          if (factHeader) {
+            return {
+              plan: header,
+              fact: factHeader,
+              baseName: base
+            };
+          }
+        }
+      }
+
+      // Резерв: просто по ключевым словам
+      const plan = findColumn(headers, ['план', 'planned', 'target']);
+      const fact = findColumn(headers, ['факт', 'actual', 'реал']);
+      
+      return {
+        plan,
+        fact,
+        baseName: plan ? String(plan).replace(/план.*/i, '').trim() : 'неизвестно'
+      };
     }
+
+    // Простой поиск колонки по ключевым словам
+    function findColumn(headers, keywords) {
+      for (let header of headers) {
+        if (!header) continue;
+        const h = String(header).toLowerCase();
+        for (let kw of keywords) {
+          if (h.includes(kw)) return header;
+        }
+      }
+      return null;
+    }
+
+    // Расчёт
+    function calculate() {
+      const office = document.getElementById('officeSelect').value;
+      const growthPercent = Number(document.getElementById('growthInput').value);
+      const targetDateInput = document.getElementById('dateInput').value;
+
+      if (!office || !targetDateInput) {
+        alert('Выберите офис и дату!');
+        return;
+      }
+
+      const targetDate = new Date(targetDateInput);
+      const growth = growthPercent / 100;
+
+      const filtered = window.dataRows.filter(row => String(row[window.officeCol]) === String(office));
+      if (filtered.length === 0) {
+        document.getElementById('result').innerHTML = '<p style="color: red">❌ Нет данных для этого офиса.</p>';
+        return;
+      }
+
+      const totalPlan = filtered.reduce((sum, row) => sum + (parseFloat(row[window.planCol]) || 0), 0);
+      const totalFact = filtered.reduce((sum, row) => sum + (parseFloat(row[window.factCol]) || 0), 0);
+
+      const target = totalPlan * (1 + growth);
+      const remaining = target - totalFact;
+
+      const today = new Date();
+      const daysLeft = Math.max(1, Math.ceil((targetDate - today) / (1000 * 60 * 60 * 24)));
+      const dailyTarget = (remaining / daysLeft).toFixed(0);
+
+      const completion = totalPlan > 0 ? ((totalFact / totalPlan) * 100).toFixed(1) : 0;
+
+      document.getElementById('result').innerHTML = `
+        <h3>🎯 Результат: <b>Офис ${office}</b></h3>
+        <p><b>План:</b> ${totalPlan.toLocaleString()} ₽</p>
+        <p><b>Факт:</b> ${totalFact.toLocaleString()} ₽</p>
+        <p><b>% выполнения:</b> <span style="color: ${completion >= 100 ? 'green' : 'orange'}">${completion}%</span></p>
+        <p><b>Цель (+${growthPercent}%):</b> ${target.toLocaleString()} ₽</p>
+        <p><b>Осталось:</b> <span style="color: ${remaining > 0 ? 'red' : 'green'}; font-weight: bold;">${remaining.toLocaleString()} ₽</span></p>
+        <p><b>Дней до даты:</b> ${daysLeft}</p>
+        <p><b>Нужно в день:</b> ${dailyTarget.replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₽</p>
+      `;
+    }
+
+    // Установим сегодняшнюю дату по умолчанию
+    window.onload = () => {
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('dateInput').value = today;
+    };
   </script>
 </body>
 </html>
