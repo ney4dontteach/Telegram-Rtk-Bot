@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>🧠 Умный анализ продаж</title>
+  <title>📊 Мульти-анализ продаж</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -13,7 +13,7 @@
       margin: 0;
     }
     .container {
-      max-width: 700px;
+      max-width: 800px;
       margin: 0 auto;
       background: white;
       border-radius: 12px;
@@ -46,25 +46,32 @@
       cursor: pointer;
       font-weight: bold;
     }
-    button:hover {
-      background-color: #2a76ef;
-    }
-    #result {
-      margin-top: 20px;
+    .target-row {
+      margin-bottom: 20px;
       padding: 15px;
-      background: #f0f8ff;
+      background: #f9f9f9;
       border-radius: 8px;
-      border: 1px solid #c0e0ff;
+      border: 1px solid #e0e0e0;
     }
     .match {
       font-size: 14px;
       color: #555;
     }
+    #result {
+      margin-top: 20px;
+    }
+    .result-item {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #f0f8ff;
+      border-radius: 8px;
+      border: 1px solid #c0e0ff;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>🧠 Умный анализ продаж</h1>
+    <h1>📊 Мульти-анализ продаж</h1>
 
     <div class="form-group">
       <label>1. Загрузите файл Excel (.xlsx)</label>
@@ -79,23 +86,18 @@
     </div>
 
     <div class="form-group">
-      <label>2. Выберите ваш офис продаж</label>
+      <label>1.2 Выберите офис продаж</label>
       <select id="officeSelect" disabled>
         <option>Сначала выберите лист</option>
       </select>
     </div>
 
-    <div class="form-group">
-      <label>3. Целевой рост (%) от плана</label>
-      <input type="number" id="growthInput" value="10" min="0" />
+    <div id="targets-container">
+      <!-- Сюда будут добавляться цели для направлений -->
     </div>
 
-    <div class="form-group">
-      <label>4. Целевая дата</label>
-      <input type="date" id="dateInput" />
-    </div>
-
-    <button onclick="calculate()" disabled id="calcButton">Рассчитать</button>
+    <button onclick="addTargetRow()" disabled id="addButton">➕ Добавить направление</button>
+    <button onclick="calculateAll()" disabled id="calcButton" style="margin-top: 10px;">Рассчитать всё</button>
 
     <div id="result"></div>
   </div>
@@ -106,9 +108,8 @@
   <script>
     let allData = [];
     let workbook = null;
-
-    // Ключевые слова для поиска колонки офиса
-    const OFFICE_KEYWORDS = ['магазин', 'офис', 'дс', 'адрес', 'номер', 'id', 'регион', 'дивизион'];
+    let directions = []; // { name, planCol, factCol }
+    let officeCol = null;
 
     // При загрузке файла
     document.getElementById('fileInput').addEventListener('change', function(e) {
@@ -135,56 +136,40 @@
       reader.readAsArrayBuffer(file);
     });
 
-    // При смене листа — анализируем структуру
+    // При смене листа
     document.getElementById('sheetSelect').addEventListener('change', function() {
       const sheetName = this.value;
       const worksheet = workbook.Sheets[sheetName];
       allData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
       
       if (allData.length < 2) {
-        document.getElementById('result').innerHTML = '<p style="color: red">❌ Недостаточно данных в листе.</p>';
+        document.getElementById('result').innerHTML = '<p style="color: red">❌ Недостаточно данных.</p>';
         return;
       }
 
-      // Первая строка — заголовки
       const headers = allData[0];
       const dataRows = allData.slice(1).map(row => {
         const obj = {};
-        headers.forEach((h, i) => {
-          obj[h] = row[i];
-        });
+        headers.forEach((h, i) => { obj[h] = row[i]; });
         return obj;
       });
 
-      // Ищем пару План/Факт по смыслу
-      const { plan: planCol, fact: factCol, baseName } = findMatchingPlanFact(headers);
-
-      if (!planCol) {
-        document.getElementById('result').innerHTML = '<p style="color: red">❌ Не найдена колонка с "планом". Проверьте названия.</p>';
-        return;
-      }
-      if (!factCol) {
-        document.getElementById('result').innerHTML = '<p style="color: red">❌ Не найдена колонка с "фактом" для <b>' + baseName + '</b>. Проверьте.</p>';
+      // Найдём все пары План/Факт
+      directions = findAllPlanFactPairs(headers);
+      if (directions.length === 0) {
+        document.getElementById('result').innerHTML = '<p style="color: red">❌ Не найдено ни одной пары План/Факт.</p>';
         return;
       }
 
-      // Ищем колонку офиса
-      const officeCol = findColumn(headers, OFFICE_KEYWORDS);
+      // Найдём колонку офиса
+      officeCol = findColumn(headers, ['магазин', 'офис', 'дс', 'адрес', 'номер', 'id']);
       if (!officeCol) {
-        document.getElementById('result').innerHTML = '<p style="color: red">❌ Не найдена колонка с "офисом". Проверьте названия.</p>';
+        document.getElementById('result').innerHTML = '<p style="color: red">❌ Не найдена колонка с офисом.</p>';
         return;
       }
 
-      // Сохраняем
-      window.headers = headers;
-      window.dataRows = dataRows;
-      window.planCol = planCol;
-      window.factCol = factCol;
-      window.officeCol = officeCol;
-
-      // Получаем уникальные офисы
+      // Заполним офисы
       const offices = [...new Set(dataRows.map(row => row[officeCol]))].filter(Boolean).sort();
-
       const officeSelect = document.getElementById('officeSelect');
       officeSelect.innerHTML = '';
       offices.forEach(office => {
@@ -195,44 +180,38 @@
       });
 
       officeSelect.disabled = false;
-      document.getElementById('calcButton').disabled = false;
-
+      document.getElementById('addButton').disabled = false;
       document.getElementById('result').innerHTML = `
         <p>✅ Лист загружен.</p>
-        <p class="match">🔧 Найдено: <b>${baseName || 'продажи'}</b></p>
-        <p class="match">📈 План = <b>${planCol}</b></p>
-        <p class="match">📊 Факт = <b>${factCol}</b></p>
-        <p class="match">🏢 Офис = <b>${officeCol}</b></p>
-        <p>Выберите офис и нажмите "Рассчитать".</p>
+        <p class="match">🔧 Найдено направлений: <b>${directions.length}</b></p>
+        <p>Выберите офис и нажмите "Добавить направление".</p>
       `;
     });
 
-    // Умный поиск: ищет пару План/Факт по общему названию
-    function findMatchingPlanFact(headers) {
-      // Сначала ищем по парам
-      for (let header of headers) {
-        if (!header) continue;
-        const h = String(header).toLowerCase();
+    // Найти все пары План/Факт
+    function findAllPlanFactPairs(headers) {
+      const pairs = [];
+      const used = new Set();
 
-        // Ищем "План", но не "Факт", не "%"
+      headers.forEach(h => {
+        if (!h || used.has(h)) return;
+        const hStr = String(h).toLowerCase();
+
         if (
-          (h.includes('план') || h.includes('planned') || h.includes('target')) &&
-          !h.includes('факт') &&
-          !h.includes('actual') &&
-          !h.includes('%') &&
-          !h.includes('выполн')
+          (hStr.includes('план') || hStr.includes('target')) &&
+          !hStr.includes('факт') &&
+          !hStr.includes('%') &&
+          !hStr.includes('выполн')
         ) {
-          // Убираем слово "план" и чистим
-          let base = h
-            .replace(/план|planned|target|plan|pl/gi, '')
+          const base = hStr
+            .replace(/план|target|planned/g, '')
             .replace(/\s+/g, ' ')
             .trim();
 
-          if (base.length < 2) continue;
+          if (base.length === 0) return;
 
-          // Ищем колонку с "факт" и тем же base
-          const factHeader = headers.find(h2 => {
-            if (!h2) return false;
+          const factCol = headers.find(h2 => {
+            if (!h2 || used.has(h2)) return false;
             const h2Str = String(h2).toLowerCase();
             return (
               (h2Str.includes('факт') || h2Str.includes('actual') || h2Str.includes('реал')) &&
@@ -240,28 +219,40 @@
             );
           });
 
-          if (factHeader) {
-            return {
-              plan: header,
-              fact: factHeader,
-              baseName: base
-            };
+          if (factCol) {
+            pairs.push({
+              name: h.replace(/план|target/i, '').trim(),
+              planCol: h,
+              factCol: factCol
+            });
+            used.add(h);
+            used.add(factCol);
           }
         }
+      });
+
+      // Резерв: просто найти все колонки с "план" и "факт"
+      if (pairs.length === 0) {
+        const planCols = headers.filter(h => h && /план|target/i.test(String(h)) && !/факт|%|выполн/i.test(String(h)));
+        const factCols = headers.filter(h => h && /факт|actual|реал/i.test(String(h)));
+
+        planCols.forEach(plan => {
+          const base = String(plan).toLowerCase().replace(/план|target/, '').trim();
+          const fact = factCols.find(f => String(f).toLowerCase().includes(base));
+          if (fact) {
+            pairs.push({
+              name: plan.replace(/план|target/i, '').trim(),
+              planCol: plan,
+              factCol: fact
+            });
+          }
+        });
       }
 
-      // Резерв: просто по ключевым словам
-      const plan = findColumn(headers, ['план', 'planned', 'target']);
-      const fact = findColumn(headers, ['факт', 'actual', 'реал']);
-      
-      return {
-        plan,
-        fact,
-        baseName: plan ? String(plan).replace(/план.*/i, '').trim() : 'неизвестно'
-      };
+      return pairs;
     }
 
-    // Простой поиск колонки по ключевым словам
+    // Простой поиск колонки
     function findColumn(headers, keywords) {
       for (let header of headers) {
         if (!header) continue;
@@ -273,55 +264,91 @@
       return null;
     }
 
-    // Расчёт
-    function calculate() {
-      const office = document.getElementById('officeSelect').value;
-      const growthPercent = Number(document.getElementById('growthInput').value);
-      const targetDateInput = document.getElementById('dateInput').value;
+    // Добавить строку выбора направления
+    function addTargetRow() {
+      const container = document.getElementById('targets-container');
+      const row = document.createElement('div');
+      row.className = 'target-row';
 
-      if (!office || !targetDateInput) {
-        alert('Выберите офис и дату!');
-        return;
-      }
-
-      const targetDate = new Date(targetDateInput);
-      const growth = growthPercent / 100;
-
-      const filtered = window.dataRows.filter(row => String(row[window.officeCol]) === String(office));
-      if (filtered.length === 0) {
-        document.getElementById('result').innerHTML = '<p style="color: red">❌ Нет данных для этого офиса.</p>';
-        return;
-      }
-
-      const totalPlan = filtered.reduce((sum, row) => sum + (parseFloat(row[window.planCol]) || 0), 0);
-      const totalFact = filtered.reduce((sum, row) => sum + (parseFloat(row[window.factCol]) || 0), 0);
-
-      const target = totalPlan * (1 + growth);
-      const remaining = target - totalFact;
-
-      const today = new Date();
-      const daysLeft = Math.max(1, Math.ceil((targetDate - today) / (1000 * 60 * 60 * 24)));
-      const dailyTarget = (remaining / daysLeft).toFixed(0);
-
-      const completion = totalPlan > 0 ? ((totalFact / totalPlan) * 100).toFixed(1) : 0;
-
-      document.getElementById('result').innerHTML = `
-        <h3>🎯 Результат: <b>Офис ${office}</b></h3>
-        <p><b>План:</b> ${totalPlan.toLocaleString()} ₽</p>
-        <p><b>Факт:</b> ${totalFact.toLocaleString()} ₽</p>
-        <p><b>% выполнения:</b> <span style="color: ${completion >= 100 ? 'green' : 'orange'}">${completion}%</span></p>
-        <p><b>Цель (+${growthPercent}%):</b> ${target.toLocaleString()} ₽</p>
-        <p><b>Осталось:</b> <span style="color: ${remaining > 0 ? 'red' : 'green'}; font-weight: bold;">${remaining.toLocaleString()} ₽</span></p>
-        <p><b>Дней до даты:</b> ${daysLeft}</p>
-        <p><b>Нужно в день:</b> ${dailyTarget.replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₽</p>
+      row.innerHTML = `
+        <label>Выберите направление</label>
+        <select class="direction-select">
+          ${directions.map(d => `<option value="${d.planCol}">${d.name}</option>`).join('')}
+        </select>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+          <div style="flex: 1;">
+            <label>Цель (%)</label>
+            <input type="number" value="10" min="0" class="growth-input" />
+          </div>
+          <div style="flex: 1;">
+            <label>Дата</label>
+            <input type="date" class="date-input" />
+          </div>
+        </div>
+        <button type="button" onclick="this.parentElement.remove()" style="margin-top: 10px; background: #e74c3c;">🗑 Удалить</button>
       `;
+
+      container.appendChild(row);
+
+      // Установим сегодняшнюю дату
+      const dateInput = row.querySelector('.date-input');
+      const today = new Date().toISOString().split('T')[0];
+      dateInput.value = today;
+
+      document.getElementById('calcButton').disabled = false;
     }
 
-    // Установим сегодняшнюю дату по умолчанию
-    window.onload = () => {
-      const today = new Date().toISOString().split('T')[0];
-      document.getElementById('dateInput').value = today;
-    };
+    // Рассчитать все направления
+    function calculateAll() {
+      const office = document.getElementById('officeSelect').value;
+      const targetRows = document.querySelectorAll('.target-row');
+      const resultDiv = document.getElementById('result');
+      resultDiv.innerHTML = `<h3>🎯 Результаты для офиса: ${office}</h3>`;
+
+      if (targetRows.length === 0) {
+        resultDiv.innerHTML += '<p>Нет направлений для анализа.</p>';
+        return;
+      }
+
+      const dataRows = allData.slice(1).map(row => {
+        const obj = {};
+        allData[0].forEach((h, i) => { obj[h] = row[i]; });
+        return obj;
+      });
+
+      targetRows.forEach(row => {
+        const planCol = row.querySelector('.direction-select').value;
+        const growth = Number(row.querySelector('.growth-input').value) / 100;
+        const targetDate = new Date(row.querySelector('.date-input').value);
+
+        const direction = directions.find(d => d.planCol === planCol);
+        if (!direction) return;
+
+        const filtered = dataRows.filter(r => String(r[officeCol]) === String(office));
+        const totalPlan = filtered.reduce((sum, r) => sum + (parseFloat(r[direction.planCol]) || 0), 0);
+        const totalFact = filtered.reduce((sum, r) => sum + (parseFloat(r[direction.factCol]) || 0), 0);
+
+        const target = totalPlan * (1 + growth);
+        const remaining = target - totalFact;
+        const today = new Date();
+        const daysLeft = Math.max(1, Math.ceil((targetDate - today) / (1000 * 60 * 60 * 24)));
+        const dailyTarget = (remaining / daysLeft).toFixed(0);
+        const completion = totalPlan > 0 ? ((totalFact / totalPlan) * 100).toFixed(1) : 0;
+
+        const item = document.createElement('div');
+        item.className = 'result-item';
+        item.innerHTML = `
+          <h4>📌 ${direction.name}</h4>
+          <p><b>План:</b> ${totalPlan.toLocaleString()} ₽</p>
+          <p><b>Факт:</b> ${totalFact.toLocaleString()} ₽</p>
+          <p><b>% выполнения:</b> <span style="color: ${completion >= 100 ? 'green' : 'orange'}">${completion}%</span></p>
+          <p><b>Цель (+${growth*100}%):</b> ${target.toLocaleString()} ₽</p>
+          <p><b>Осталось:</b> <span style="color: ${remaining > 0 ? 'red' : 'green'}">${remaining.toLocaleString()} ₽</span></p>
+          <p><b>Нужно в день:</b> ${dailyTarget.replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₽</p>
+        `;
+        resultDiv.appendChild(item);
+      });
+    }
   </script>
 </body>
 </html>
