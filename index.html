@@ -303,10 +303,9 @@
       const office = document.getElementById('officeSelect').value;
       const targetRows = document.querySelectorAll('.target-row');
       const resultDiv = document.getElementById('result');
-      resultDiv.innerHTML = `<h3>🎯 Результаты для офиса: ${office}</h3>`;
-
+      
       if (targetRows.length === 0) {
-        resultDiv.innerHTML += '<p>Нет направлений для анализа.</p>';
+        resultDiv.innerHTML = '<p>Нет направлений для анализа.</p>';
         return;
       }
 
@@ -315,6 +314,9 @@
         allData[0].forEach((h, i) => { obj[h] = row[i]; });
         return obj;
       });
+
+      // Собираем данные для таблицы
+      const tableRows = [];
 
       targetRows.forEach(row => {
         const planCol = row.querySelector('.direction-select').value;
@@ -333,21 +335,65 @@
         const today = new Date();
         const daysLeft = Math.max(1, Math.ceil((targetDate - today) / (1000 * 60 * 60 * 24)));
         const dailyTarget = (remaining / daysLeft).toFixed(0);
-        const completion = totalPlan > 0 ? ((totalFact / totalPlan) * 100).toFixed(1) : 0;
+        const completion = totalPlan > 0 ? ((totalFact / totalPlan) * 100) : 0;
+        const dailyPlan = (totalPlan / 30).toFixed(0); // Средний дневной план (на 30 дней)
+        const forecast = ((totalFact / totalPlan) * 100).toFixed(1);
+        const diff = totalFact - totalPlan; // отставание/перевыполнение
 
-        const item = document.createElement('div');
-        item.className = 'result-item';
-        item.innerHTML = `
-          <h4>📌 ${direction.name}</h4>
-          <p><b>План:</b> ${totalPlan.toLocaleString()} ₽</p>
-          <p><b>Факт:</b> ${totalFact.toLocaleString()} ₽</p>
-          <p><b>% выполнения:</b> <span style="color: ${completion >= 100 ? 'green' : 'orange'}">${completion}%</span></p>
-          <p><b>Цель (+${growth*100}%):</b> ${target.toLocaleString()} ₽</p>
-          <p><b>Осталось:</b> <span style="color: ${remaining > 0 ? 'red' : 'green'}">${remaining.toLocaleString()} ₽</span></p>
-          <p><b>Нужно в день:</b> ${dailyTarget.replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₽</p>
-        `;
-        resultDiv.appendChild(item);
+        tableRows.push({
+          name: direction.name,
+          totalPlan: totalPlan.toLocaleString(),
+          dailyPlan: dailyPlan.replace(/\B(?=(\d{3})+(?!\d))/g, " "),
+          fact: totalFact.toLocaleString(),
+          forecast: `${forecast}%`,
+          diff: diff >= 0 
+            ? `<span style="color: green">+${diff.toLocaleString()} ₽</span>` 
+            : `<span style="color: red">${diff.toLocaleString()} ₽</span>`,
+          dailyTarget: dailyTarget.replace(/\B(?=(\d{3})+(?!\d))/g, " ")
+        });
       });
+
+      // Формируем таблицу
+      let tableHTML = `
+        <h3>🎯 Результаты для офиса: ${office}</h3>
+        <table border="1" cellpadding="8" cellspacing="0" style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px;">
+          <thead>
+            <tr style="background: #3a86ff; color: white;">
+              <th>Направление</th>
+              <th>План месяца</th>
+              <th>Средний дневной план</th>
+              <th>Факт</th>
+              <th>Текущее выполнение (прогноз)</th>
+              <th>Отставание/Перевыполнение</th>
+              <th>Нужно в день</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      tableRows.forEach(row => {
+        tableHTML += `
+          <tr style="text-align: center; border-bottom: 1px solid #ddd;">
+            <td style="font-weight: bold;"><b>${row.name}</b></td>
+            <td>${row.totalPlan} ₽</td>
+            <td>${row.dailyPlan} ₽</td>
+            <td>${row.fact} ₽</td>
+            <td>${row.forecast}</td>
+            <td>${row.diff}</td>
+            <td><b>${row.dailyTarget} ₽</b></td>
+          </tr>
+        `;
+      });
+
+      tableHTML += `
+          </tbody>
+        </table>
+        <p style="margin-top: 15px; font-size: 12px; color: #777;">
+          <i>💡 Прогноз рассчитан по факту на сегодня. "Нужно в день" — чтобы достичь цели к указанной дате.</i>
+        </p>
+      `;
+
+      resultDiv.innerHTML = tableHTML;
     }
   </script>
 </body>
